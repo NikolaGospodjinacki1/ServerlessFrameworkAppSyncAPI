@@ -1,0 +1,4 @@
+
+
+#set( $res = $ctx.result )
+$util.toJson({"result": $ctx.result})

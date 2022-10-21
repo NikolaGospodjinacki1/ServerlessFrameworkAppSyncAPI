@@ -1,0 +1,170 @@
+
+service: serverlessFrameworkAppSychAPI
+
+frameworkVersion: '3'
+
+# The `provider` block defines where your service will be deployed
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, 'dev'}
+  profile: serverlesspers
+  region: eu-west-1
+  environment:
+    DYNAMODB_TABLE: ${self:service}-${sls:stage}
+# The `functions` block defines what code to deploy
+plugins:
+  - serverless-appsync-plugin
+
+
+custom:
+  appSync:
+    allowHashDescription: true
+    name: serverless_api
+    authenticationType: AMAZON_COGNITO_USER_POOLS
+    schema: schema.graphql
+    userPoolConfig:
+      awsRegion: ${aws:region}
+      defaultAction: ALLOW
+      userPoolId: { Ref: CognitoUserPool }
+    mappingTemplateLocation: mapping-templates
+    mappingTemplates:
+      - dataSource: dynamodb_source
+        type: Query
+        field: getProjectById
+        request: query-getprojectbyid-request-template.txt
+        response: query-getprojectbyid-response-template.txt
+      - dataSource: dynamodb_source
+        type: Mutation
+        field: putProject
+        request: mutation-createproject-request-template.txt
+        response: mutation-createproject-response-template.txt
+    dataSources:
+      - type: AMAZON_DYNAMODB
+        name: dynamodb_source
+        description: source/location table of project info
+        config:
+          tableName: { Ref: Table}
+          serviceRoleArn: { Fn::GetAtt: [AppSyncServiceRole, Arn]}
+        #region: region for table
+    xrayEnabled: true
+    tags:
+      project: jira_serverless
+    #GraphQlApiIdand GraphQlApiUrl are exported to allow cross-stack resource reference using Fn::ImportValue.
+    #Output Exports are named with a ${AWS::StackName}- prefix to the logical IDs. 
+    #For example, ${AWS::StackName}-GraphQlApiId
+
+resources:
+  Resources:
+    Table:
+    #npm install --save aws-sdk
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: projectId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: projectId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.DYNAMODB_TABLE}
+        #BillingMode: PAY_PER_REQUEST
+
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: cognito_serverless_backend_user_pool
+       
+
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: cognito_sls_backend_client
+        UserPoolId:
+          Ref: CognitoUserPool
+
+    CognitoIdentityPool:
+      Type: AWS::Cognito::IdentityPool
+      Properties:
+        IdentityPoolName: cognito_serverless_backend_identity_pool
+        AllowUnauthenticatedIdentities: false
+        CognitoIdentityProviders:
+          - ClientId:
+              Ref: CognitoUserPoolClient
+            ProviderName:
+              Fn::GetAtt: [CognitoUserPool, ProviderName]
+
+    CognitoIdentityPoolRoles:
+      Type: AWS::Cognito::IdentityPoolRoleAttachment
+      Properties:
+        IdentityPoolId:
+          Ref: CognitoIdentityPool
+        Roles:
+          authenticated:
+            Fn::GetAtt: [CognitoAuthRole, Arn]
+
+    CognitoAuthRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: appAuthRole
+        Path: /
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Federated: "cognito-identity.amazonaws.com"
+              Action:
+                - "sts:AssumeRoleWithWebIdentity"
+              Condition:
+                StringEquals:
+                  "cognito-identity.amazonaws.com:aud":
+                    Ref: CognitoIdentityPool
+                "ForAnyValue:StringLike":
+                  "cognito-identity.amazonaws.com:amr": authenticated
+        Policies:
+          - PolicyName: "CognitoAuthorizedPolicy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - "mobileanalytics:PutEvents"
+                    - "cognito-sync:*"
+                    - "cognito-identity:*"
+                  Resource: "*"
+                - Effect: "Allow"
+                  Action:
+                    - "execute-api:Invoke"
+                  Resource: "*"
+
+    AppSyncServiceRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub "appsync-api-role"
+        AssumeRolePolicyDocument: 
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Service:
+                  - "appsync.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"  
+        Policies:
+          - PolicyName: "dynamodb-policy"
+            PolicyDocument: 
+              Version: "2012-10-17"
+              Statement: 
+                - Effect: "Allow"
+                  Action:
+                    - dynamodb:DescribeTable
+                    - dynamodb:Query
+                    - dynamodb:Scan
+                    - dynamodb:GetItem
+                    - dynamodb:PutItem
+                    - dynamodb:UpdateItem
+                    - dynamodb:DeleteItem
+                  Resource: "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"

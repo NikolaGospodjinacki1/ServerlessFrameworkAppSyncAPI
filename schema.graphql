@@ -1,0 +1,51 @@
+enum Type {
+    internal
+    external
+}
+
+input TeamInput {
+  name: String!
+  id: String!
+}
+
+input ProjectCreateRequest {
+  name: String!
+  type: Type!
+  team: [TeamInput]
+  description: String
+}
+
+input ProjectRequest {
+  projectId: String!
+}
+
+type Mutation {
+  putProject(input: ProjectCreateRequest): CreateResponse
+}
+
+type Query {
+  getProjectById(input: ProjectRequest):  ProjectOutput
+}
+
+type TeamOutput {
+  name: String
+  id: String
+}
+
+type ProjectOutput {
+  projectId: String
+  name: String
+  type: Type
+  team: [TeamOutput]
+  description: String
+}
+
+type CreateResponse {
+  result: AWSJSON
+}
+
+schema {
+  query:Query
+  mutation:Mutation
+}
+
