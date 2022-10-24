@@ -1,18 +1,22 @@
 
-service: serverlessFrameworkAppSychAPI
+service: ${env:PROJECT_NAME}AppSychAPI
 
 frameworkVersion: '3'
 
 # The `provider` block defines where your service will be deployed
+useDotenv: true
+
 provider:
   name: aws
-  runtime: nodejs12.x
+  runtime: nodejs16.x
   stage: ${opt:stage, 'dev'}
-  profile: serverlesspers
-  region: eu-west-1
+  profile: ${env:DEV_PROFILE_NAME} ## AWS ACCOUNT/PROFILE_NAME from ~/.aws/credentials where the stack will be deployed
+    #dev: 
+    #prod: leviaccount
+  region: ${env:REGION}
   environment:
-    DYNAMODB_TABLE: ${self:service}-${sls:stage}
-# The `functions` block defines what code to deploy
+    DYNAMODB_TABLE: ${self:service}-${sls:stage}-${env:PROJECT_NAME}
+
 plugins:
   - serverless-appsync-plugin
 
@@ -20,11 +24,11 @@ plugins:
 custom:
   appSync:
     allowHashDescription: true
-    name: serverless_api
+    name: serverless_api_${env:PROJECT_NAME}
     authenticationType: AMAZON_COGNITO_USER_POOLS
     schema: schema.graphql
     userPoolConfig:
-      awsRegion: ${aws:region}
+      awsRegion: ${env:REGION}
       defaultAction: ALLOW
       userPoolId: { Ref: CognitoUserPool }
     mappingTemplateLocation: mapping-templates
@@ -49,15 +53,11 @@ custom:
         #region: region for table
     xrayEnabled: true
     tags:
-      project: jira_serverless
-    #GraphQlApiIdand GraphQlApiUrl are exported to allow cross-stack resource reference using Fn::ImportValue.
-    #Output Exports are named with a ${AWS::StackName}- prefix to the logical IDs. 
-    #For example, ${AWS::StackName}-GraphQlApiId
+      project: ${env:PROJECT_NAME}
 
 resources:
   Resources:
     Table:
-    #npm install --save aws-sdk
       Type: 'AWS::DynamoDB::Table'
       Properties:
         AttributeDefinitions:
@@ -75,9 +75,8 @@ resources:
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
       Properties:
-        UserPoolName: cognito_serverless_backend_user_pool
-       
-
+        UserPoolName: cognito_${env:PROJECT_NAME}_backend_user_pool
+      
     CognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
       Properties:
@@ -88,7 +87,7 @@ resources:
     CognitoIdentityPool:
       Type: AWS::Cognito::IdentityPool
       Properties:
-        IdentityPoolName: cognito_serverless_backend_identity_pool
+        IdentityPoolName: cognito_${env:PROJECT_NAME}_identity_pool
         AllowUnauthenticatedIdentities: false
         CognitoIdentityProviders:
           - ClientId:
@@ -108,7 +107,7 @@ resources:
     CognitoAuthRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: appAuthRole
+        RoleName: app_${env:PROJECT_NAME}_auth_role
         Path: /
         AssumeRolePolicyDocument:
           Version: "2012-10-17"
@@ -125,7 +124,7 @@ resources:
                 "ForAnyValue:StringLike":
                   "cognito-identity.amazonaws.com:amr": authenticated
         Policies:
-          - PolicyName: "CognitoAuthorizedPolicy"
+          - PolicyName: "cognito_${env:PROJECT_NAME}_authorized_policy"
             PolicyDocument:
               Version: "2012-10-17"
               Statement:
@@ -143,7 +142,7 @@ resources:
     AppSyncServiceRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: !Sub "appsync-api-role"
+        RoleName: !Sub "appsync_${env:PROJECT_NAME}_api_role"
         AssumeRolePolicyDocument: 
           Version: "2012-10-17"
           Statement:
@@ -154,7 +153,7 @@ resources:
               Action:
                 - "sts:AssumeRole"  
         Policies:
-          - PolicyName: "dynamodb-policy"
+          - PolicyName: "dynamodb_${env:PROJECT_NAME}_policy"
             PolicyDocument: 
               Version: "2012-10-17"
               Statement: 
