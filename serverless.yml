@@ -1,32 +1,29 @@
 
 service: ${env:PROJECT_NAME}AppSychAPI
-
 frameworkVersion: '3'
-
-# The `provider` block defines where your service will be deployed
 useDotenv: true
+# automatically picks up dotenv files (.env first, if not available .env.EVIRONMENT or .env.LOCAL.... read docs)
 
 provider:
   name: aws
-  runtime: nodejs16.x
-  stage: ${opt:stage, 'dev'}
-  profile: ${env:DEV_PROFILE_NAME} ## AWS ACCOUNT/PROFILE_NAME from ~/.aws/credentials where the stack will be deployed
-    #dev: 
-    #prod: leviaccount
+  runtime: nodejs14.x
+  stage: ${opt:stage, 'dev'} # stage can be specified on deploy, dev by default
+  profile: ${env:DEV_PROFILE_NAME} # profile name from ~/.aws/credentials 
   region: ${env:REGION}
   environment:
     DYNAMODB_TABLE: ${self:service}-${sls:stage}-${env:PROJECT_NAME}
 
 plugins:
-  - serverless-appsync-plugin
-
+  - serverless-appsync-plugin # simplifies appsync api defintion
+  - serverless-s3-sync # copies (static?) local files to s3 bucket used for CloudFront 
+  - serverless-cloudfront-invalidate # invalidates s3 content (refreshes CloudFront) on every 'sls deploy'
 
 custom:
   appSync:
+    name: ${env:PROJECT_NAME}_api
     allowHashDescription: true
-    name: serverless_api_${env:PROJECT_NAME}
     authenticationType: AMAZON_COGNITO_USER_POOLS
-    schema: schema.graphql
+    schema: schema.graphql 
     userPoolConfig:
       awsRegion: ${env:REGION}
       defaultAction: ALLOW
@@ -46,17 +43,79 @@ custom:
     dataSources:
       - type: AMAZON_DYNAMODB
         name: dynamodb_source
-        description: source/location table of project info
+        description: source/location table 
         config:
           tableName: { Ref: Table}
           serviceRoleArn: { Fn::GetAtt: [AppSyncServiceRole, Arn]}
         #region: region for table
-    xrayEnabled: true
+    xrayEnabled: true #xray tracing/logging
     tags:
       project: ${env:PROJECT_NAME}
 
+  s3Sync:
+    - bucketName: ${env:STATIC_BUCKET_NAME}-${sls:stage}
+      localDir: out/ # directory that contains static files to be server by CloudFront
+      acl: private
+
+  cloudfrontInvalidate:
+    - distributionIdKey: DistributionId # invalidate files for this distribution (value from stack output)
+      items:
+        - "/*" # invalidate all in bucket
+
 resources:
   Resources:
+  ##### CLOUDFRONT/S3 RESOURCES #####
+    OriginAccessIdentity:
+      Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+      Properties:
+        CloudFrontOriginAccessIdentityConfig:
+          Comment: !Sub ${env:PROJECT_NAME}_${sls:stage}_s3_origin_oai
+
+    StaticResourcesBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: !Sub ${env:STATIC_BUCKET_NAME}-${sls:stage}
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        PublicAccessBlockConfiguration: # private bucket (only accessible through CloudFront url (or custom domain))
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+
+    Distribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Origins:
+            - DomainName: !Sub ${StaticResourcesBucket}.s3.${AWS::Region}.amazonaws.com
+              Id: S3Origin
+              S3OriginConfig:
+                OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessIdentity}
+          Enabled: true
+          DefaultRootObject: index.html
+          DefaultCacheBehavior:
+            AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+            TargetOriginId: S3Origin
+            ForwardedValues:
+              QueryString: false
+              Cookies:
+                Forward: none
+            ViewerProtocolPolicy: redirect-to-https # https only
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          PriceClass: PriceClass_100 # EU and NA
+          #PriceClass_All
+
+    ##### DYNAMODB RESOURCES #####
     Table:
       Type: 'AWS::DynamoDB::Table'
       Properties:
@@ -69,9 +128,10 @@ resources:
         ProvisionedThroughput:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
+          #BillingMode: PAY_PER_REQUEST
         TableName: ${self:provider.environment.DYNAMODB_TABLE}
-        #BillingMode: PAY_PER_REQUEST
 
+    ##### COGNITO RESOURCES #####    
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
       Properties:
@@ -103,6 +163,19 @@ resources:
         Roles:
           authenticated:
             Fn::GetAtt: [CognitoAuthRole, Arn]
+
+    ##### ROLE/POLICY RESOURCES #####
+    StaticResourcesBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref StaticResourcesBucket
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal: # allow CloudFront to retrive (GET) objects from private S3 bucket through OAI
+                AWS: !Sub arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OriginAccessIdentity}
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::${StaticResourcesBucket}/*
 
     CognitoAuthRole:
       Type: AWS::IAM::Role
@@ -152,7 +225,7 @@ resources:
                   - "appsync.amazonaws.com"
               Action:
                 - "sts:AssumeRole"  
-        Policies:
+        Policies: # appSync api can do these operations on DDB table defined in the stack (currently all basic operations)
           - PolicyName: "dynamodb_${env:PROJECT_NAME}_policy"
             PolicyDocument: 
               Version: "2012-10-17"
@@ -167,3 +240,20 @@ resources:
                     - dynamodb:UpdateItem
                     - dynamodb:DeleteItem
                   Resource: "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
+
+  Outputs:
+    DistributionId:
+      Description: CloudFront Distribution Id
+      Value: !Ref Distribution
+      Export:
+        Name: !Sub ${AWS::StackName}-DistributionId
+    DistributionDomainName:
+      Description: CloudFront Distribution Domain Name
+      Value: !GetAtt Distribution.DomainName
+      Export:
+        Name: !Sub ${AWS::StackName}-DistributionDomainName
+    StaticResourcesBucketName:
+      Description: Static Resources Bucket Name
+      Value: !Ref StaticResourcesBucket
+      Export:
+        Name: !Sub ${AWS::StackName}-StaticResourcesBucketName
