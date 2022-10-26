@@ -18,7 +18,8 @@
   },
   "homepage": "https://github.com/NikolaGospodjinacki1/ServerlessFrameworkAppSyncAPI#readme",
   "dependencies": {
-    "serverless-appsync-plugin": "^1.14.0"
+    "serverless-appsync-plugin": "^1.14.0",
+    "serverless-nested-stack": "^0.0.7"
   },
   "devDependencies": {
     "serverless-cloudfront-invalidate": "^1.12.2",

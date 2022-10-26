@@ -18,6 +18,7 @@ plugins:
   - serverless-s3-sync # copies (static?) local files to s3 bucket used for CloudFront 
   - serverless-cloudfront-invalidate # invalidates s3 content (refreshes CloudFront) on every 'sls deploy'
 
+
 custom:
   appSync:
     name: ${env:PROJECT_NAME}_api
@@ -61,7 +62,7 @@ custom:
     - distributionIdKey: DistributionId # invalidate files for this distribution (value from stack output)
       items:
         - "/*" # invalidate all in bucket
-
+  
 resources:
   Resources:
   ##### CLOUDFRONT/S3 RESOURCES #####
@@ -89,32 +90,75 @@ resources:
       Type: AWS::CloudFront::Distribution
       Properties:
         DistributionConfig:
+          DefaultRootObject: index.html
+          CacheBehaviors:
+            - PathPattern: /parseauth
+              Compress: true
+              ForwardedValues:
+                QueryString: true
+              LambdaFunctionAssociations:
+                - EventType: viewer-request
+                  LambdaFunctionARN: !GetAtt 'LambdaEdgeProtection.Outputs.ParseAuthHandler'
+              TargetOriginId: dummy-origin
+              ViewerProtocolPolicy: redirect-to-https
+            - PathPattern: /refreshauth
+              Compress: true
+              ForwardedValues:
+                QueryString: true
+              LambdaFunctionAssociations:
+                - EventType: viewer-request
+                  LambdaFunctionARN: !GetAtt 'LambdaEdgeProtection.Outputs.RefreshAuthHandler'
+              TargetOriginId: dummy-origin
+              ViewerProtocolPolicy: redirect-to-https
+            - PathPattern: /signout
+              Compress: true
+              ForwardedValues:
+                QueryString: true
+              LambdaFunctionAssociations:
+                - EventType: viewer-request
+                  LambdaFunctionARN: !GetAtt 'LambdaEdgeProtection.Outputs.SignOutHandler'
+              TargetOriginId: dummy-origin
+              ViewerProtocolPolicy: redirect-to-https
+          DefaultCacheBehavior:
+            Compress: true
+            ForwardedValues:
+              QueryString: true
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !GetAtt 'LambdaEdgeProtection.Outputs.CheckAuthHandler'
+              - EventType: origin-response
+                LambdaFunctionARN: !GetAtt 'LambdaEdgeProtection.Outputs.HttpHeadersHandler'
+            TargetOriginId: protected-origin
+            ViewerProtocolPolicy: redirect-to-https # https only
           Origins:
+            - DomainName: example.org
+              Id: dummy-origin
+              CustomOriginConfig:
+                OriginProtocolPolicy: match-viewer
             - DomainName: !Sub ${StaticResourcesBucket}.s3.${AWS::Region}.amazonaws.com
-              Id: S3Origin
+              Id: protected-origin
               S3OriginConfig:
                 OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessIdentity}
+          CustomErrorResponses:
+            - ErrorCode: 404
+              ResponseCode: 200
+              ResponsePagePath: /index.html
           Enabled: true
-          DefaultRootObject: index.html
-          DefaultCacheBehavior:
-            AllowedMethods:
-              - DELETE
-              - GET
-              - HEAD
-              - OPTIONS
-              - PATCH
-              - POST
-              - PUT
-            TargetOriginId: S3Origin
-            ForwardedValues:
-              QueryString: false
-              Cookies:
-                Forward: none
-            ViewerProtocolPolicy: redirect-to-https # https only
-            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          PriceClass: PriceClass_100 # EU and NA
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # pre-made policy
+          PriceClass: ${env:CF_PRICE_CLASS} # EU and NA
           #PriceClass_All
-
+          
+    LambdaEdgeProtection:
+      Type: AWS::CloudFormation::Stack
+      Properties:
+        TemplateURL: >-
+          https://awsserverlessrepo-changesets-plntc6bfnfj.s3.amazonaws.com/802288441694/arn%3Aaws%3Aserverlessrepo%3Aus-east-1%3A520945424137%3Aapplications-cloudfront-authorization-at-edge-versions-2.1.5/87f0cf57-e58d-4293-8da3-e87dd8450333.yaml?X-Amz-Security-Token=IQoJb3JpZ2luX2VjEA4aCXVzLWVhc3QtMSJHMEUCIHznrfW80wlLeHmrJjaJw8Joh8Vpw7PQS5TrdeRKyFrLAiEAscZY3ybCC%2FTFiQpoS1eGrijXMguQvdvSELTYd37V%2FToqsAMI5%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARACGgwwNjYyNDI0Njg2NTQiDF%2BwfqfTQucUeSlfVCqEAx%2FCDohzzmKUkZv4o5wnIhbn760fcnUmmqYFx1kiR2fLAjmyKyNClNrErYLqIxlhFYFXKZlVdnDByZNKAd%2FQRuihJOEXk8p2hZHMmtM%2F8FyhQysrDq%2FakQd4Kbk9wIPfV5wUI2IbWIfs2EZ8vbsd4q0YFE58JV7NZqSNqcmhWRUVaXCkoGJfEzJKK9jZXAcaT6wrJ4e8Ps78O%2FcxgKpWSPCy20nb2dUAUszgkTb%2BowBo4Cq54CrsX8mVZvCfLWdntYDIYDydMmcB%2B0aLyA%2BVBnt5AEGBGq9Owg4GrZR6CnL0wCu9bcmt011b2Di51diKf2pf74cuIfK2gYvO8ipFM7xymC5x8K0W4MJbcVOBCMRvPIrdnNogvkUT1st3NhGuEZo5iQau%2B5QVk0lQpwurIC%2BcnhEBcy7ZYjOBg%2FtLFzscugU0HAPwXjL2Gvrfb3GpqfHNKCrmsrHgLMWMXv7kmfSJpeWk2Gb6RHb89jqle%2Fvai%2FtFTX7mSnEoLcR39XjBeIY0z%2FMw%2BY%2FjmgY6nQHBiQpwRbyP8diuoWb2Z8lPTJE0sZYSs1adTvV8Lea7aWvN0RFsxNXBVe33Dx4rn1hiB4VlLb1SMkIwUmY6qLGRUKq9q3jeTUOYj0lh%2BinRpUb1USZ1eIQir07McX3Rh6Dd1cwK8aR2cCnBKwb%2BibqBabBuAumZ3Gn5qt6kynEPMKOVBWRyumOHt39U02A14XMPSZ4fCRea9NAjj10R&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20221026T072937Z&X-Amz-SignedHeaders=host&X-Amz-Expires=21600&X-Amz-Credential=ASIAQ63C33MXL3XUX27E%2F20221026%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=5a3ea28fe1f104ab61d8a98b5434f45a25d87a1574359edfdbb2519049e7c843
+        Parameters:
+          CreateCloudFrontDistribution: 'false'
+          HttpHeaders: ${env:HTTP_HEADERS}
+        Tags:
+          - Key: serverlessrepo
+            Value: "arn:aws:serverlessrepo:us-east-1:520945424137:applications/cloudfront-authorization-at-edge"
     ##### DYNAMODB RESOURCES #####
     Table:
       Type: 'AWS::DynamoDB::Table'
@@ -140,7 +184,7 @@ resources:
     CognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
       Properties:
-        ClientName: cognito_sls_backend_client
+        ClientName: cognito_${env:PROJECT_NAME}_backend_client
         UserPoolId:
           Ref: CognitoUserPool
 
