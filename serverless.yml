@@ -14,56 +14,264 @@ provider:
     DYNAMODB_TABLE: ${self:service}-${sls:stage}-${env:PROJECT_NAME}
 
 plugins:
-  - serverless-appsync-plugin # simplifies appsync api defintion
-  - serverless-s3-sync # copies (static?) local files to s3 bucket used for CloudFront 
-  - serverless-cloudfront-invalidate # invalidates s3 content (refreshes CloudFront) on every 'sls deploy'
+ - serverless-appsync-plugin # simplifies appsync api defintion
+ #- serverless-appsync-cloudfront
+ - serverless-s3-sync # copies (static?) local files to s3 bucket used for CloudFront 
+ - serverless-cloudfront-invalidate # invalidates s3 content (refreshes CloudFront) on every 'sls deploy'
 
 custom:
-  appSync:
-    name: ${env:PROJECT_NAME}_api
-    allowHashDescription: true
-    authenticationType: AMAZON_COGNITO_USER_POOLS
-    schema: schema.graphql 
-    userPoolConfig:
-      awsRegion: ${env:REGION}
-      defaultAction: ALLOW
-      userPoolId: { Ref: CognitoUserPool }
-    mappingTemplateLocation: mapping-templates
-    mappingTemplates:
-      - dataSource: dynamodb_source
-        type: Query
-        field: getProjectById
-        request: query-getprojectbyid-request-template.txt
-        response: query-getprojectbyid-response-template.txt
-      - dataSource: dynamodb_source
-        type: Mutation
-        field: putProject
-        request: mutation-createproject-request-template.txt
-        response: mutation-createproject-response-template.txt
-    dataSources:
-      - type: AMAZON_DYNAMODB
-        name: dynamodb_source
-        description: source/location table 
-        config:
-          tableName: { Ref: Table}
-          serviceRoleArn: { Fn::GetAtt: [AppSyncServiceRole, Arn]}
-        #region: region for table
-    xrayEnabled: true #xray tracing/logging
-    tags:
-      project: ${env:PROJECT_NAME}
+ appSync:
+   name: ${env:PROJECT_NAME}_${sls:stage}_api
+   allowHashDescription: true
+   authenticationType: AMAZON_COGNITO_USER_POOLS
+   schema: schema.graphql 
+   userPoolConfig:
+     awsRegion: ${env:REGION}
+     defaultAction: ALLOW
+     userPoolId: { Ref: CognitoUserPool }
+   mappingTemplateLocation: mapping-templates
+   mappingTemplates:
+     - dataSource: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       type: Query
+       field: getPet
+       request: query-getPet-request.vtl
+       response: query-getPet-response.vtl
+     - dataSource: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       type: Query
+       field: listPets
+       request: query-listPets-request.vtl
+       response: query-listPets-response.vtl
+     - dataSource: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       type: Query
+       field: listPetsByPriceRange
+       request: query-listPetsByPriceRange-request.vtl
+       response: query-listPetsByPriceRange-response.vtl
+     - dataSource: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       type: Mutation
+       field: createPet
+       request: mutation-createPet-request.vtl
+       response: mutation-createPet-response.vtl
+     - dataSource: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       type: Mutation
+       field: updatePet
+       request: mutation-updatePet-request.vtl
+       response: mutation-updatePet-response.vtl
+     - dataSource: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       type: Mutation
+       field: deletePet
+       request: mutation-deletePet-request.vtl
+       response: mutation-deletePet-response.vtl
+   dataSources:
+     - type: RELATIONAL_DATABASE
+       name: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
+       description: "RDS data source for Serverless POC app"
+       config:
+         dbClusterIdentifier: { Ref: RDSCluster } # The identifier for RDSCluster. Where RDSCluster is the cluster defined in Resources
+         awsSecretStoreArn: { Ref: RDSSecret } # The RDSClusterSecret ARN. Where RDSClusterSecret is the cluster secret defined in Resources
+         serviceRoleArn: { Fn::GetAtt: [AppSyncServiceRole, Arn] } # Where RelationalDbServiceRole is an IAM role defined in Resources
+         databaseName: ${env:PROJECT_NAME}_${sls:stage}_database
+         schema: # optional database schema
+         iamRoleStatements: # custom IAM Role statements for this DataSource. Ignored if `serviceRoleArn` is present. Auto-generated if both `serviceRoleArn` and `iamRoleStatements` are omitted
+           - Effect: 'Allow'
+             Action:
+               - 'rds-data:DeleteItems'
+               - 'rds-data:ExecuteSql'
+               - 'rds-data:ExecuteStatement'
+               - 'rds-data:GetItems'
+               - 'rds-data:InsertItems'
+               - 'rds-data:UpdateItems'
+             Resource:
+               - 'arn:aws:rds:${env:REGION}:${env:ACCOUNT_ID}:cluster:*'
+               - 'arn:aws:rds:${env:REGION}:${env:ACCOUNT_ID}:cluster:*:*'
+           - Effect: 'Allow'
+             Action:
+               - 'secretsmanager:GetSecretValue'
+             Resource:
+               - 'arn:aws:secretsmanager:${env:REGION}:${env:ACCOUNT_ID}:secret:*'
+               - 'arn:aws:secretsmanager:${env:REGION}:${env:ACCOUNT_ID}:secret:*:*'
+       #region: region for table
+   xrayEnabled: true #xray tracing/logging
+   tags:
+     project: ${env:PROJECT_NAME}
 
-  s3Sync:
-    - bucketName: ${env:STATIC_BUCKET_NAME}-${sls:stage}
-      localDir: out/ # directory that contains static files to be server by CloudFront
-      acl: private
+ s3Sync:
+   - bucketName: ${env:STATIC_BUCKET_NAME}-${sls:stage}-bucket
+     localDir: out/ # directory that contains static files to be served by CloudFront
+     acl: private
 
-  cloudfrontInvalidate:
-    - distributionIdKey: DistributionId # invalidate files for this distribution (value from stack output)
-      items:
-        - "/*" # invalidate all in bucket
+ cloudfrontInvalidate:
+   - distributionIdKey: DistributionId # invalidate files for this distribution (value from stack output)
+     items:
+       - "/*" # invalidate all in bucket
 
 resources:
   Resources:
+  ##### VPC #####
+    VPC:
+      Type: 'AWS::EC2::VPC'
+      Properties:
+        CidrBlock: 10.0.0.0/16
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+        Tags:
+          - Key: Name
+            Value: VPC
+
+    InternetGateway:
+      Type: 'AWS::EC2::InternetGateway'
+      Properties:
+        Tags:
+          - Key: Name
+            Value: InternetGateway
+
+    InternetGatewayAttachment:
+      Type: 'AWS::EC2::VPCGatewayAttachment'
+      Properties:
+        InternetGatewayId: !Ref InternetGateway
+        VpcId: !Ref VPC
+
+    PublicSubnet1:
+      Type: 'AWS::EC2::Subnet'
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select 
+          - '0'
+          - !GetAZs ''
+        CidrBlock: 10.0.0.0/24
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: PublicSubnet1
+
+    PublicSubnet2:
+      Type: 'AWS::EC2::Subnet'
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select 
+          - '1'
+          - !GetAZs ''
+        CidrBlock: 10.0.1.0/24
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: PublicSubnet2
+
+    PrivateSubnet1:
+      Type: 'AWS::EC2::Subnet'
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select 
+          - '0'
+          - !GetAZs ''
+        CidrBlock: 10.0.10.0/24
+        MapPublicIpOnLaunch: false
+        Tags:
+          - Key: Name
+            Value: PrivateSubnet1
+
+    PrivateSubnet2:
+      Type: 'AWS::EC2::Subnet'
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select 
+          - '1'
+          - !GetAZs ''
+        CidrBlock: 10.0.11.0/24
+        MapPublicIpOnLaunch: false
+        Tags:
+          - Key: Name
+            Value: PrivateSubnet2
+
+    PublicRouteTable:
+      Type: 'AWS::EC2::RouteTable'
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+          - Key: Name
+            Value: Public route table
+
+    PublicRoute1:
+      Type: 'AWS::EC2::Route'
+      DependsOn: InternetGatewayAttachment
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: !Ref InternetGateway
+
+    PublicSubnet1RouteTableAssociation:
+      Type: 'AWS::EC2::SubnetRouteTableAssociation'
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        SubnetId: !Ref PublicSubnet1
+
+    PublicSubnet2RouteTableAssociation:
+      Type: 'AWS::EC2::SubnetRouteTableAssociation'
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        SubnetId: !Ref PublicSubnet2
+
+    PrivateRouteTable:
+      Type: 'AWS::EC2::RouteTable'
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+          - Key: Name
+            Value: Private route table
+
+    PrivateSubnet1RouteTableAssociation:
+      Type: 'AWS::EC2::SubnetRouteTableAssociation'
+      Properties:
+        RouteTableId: !Ref PrivateRouteTable
+        SubnetId: !Ref PrivateSubnet1
+        
+    PrivateSubnet2RouteTableAssociation:
+      Type: 'AWS::EC2::SubnetRouteTableAssociation'
+      Properties:
+        RouteTableId: !Ref PrivateRouteTable
+        SubnetId: !Ref PrivateSubnet2
+    
+    InstanceSecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupName: "Example Security Group"
+        GroupDescription: "RDS traffic"
+        VpcId: !Ref VPC
+        SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: "0.0.0.0/0"
+
+    InstanceSecurityGroupIngress:
+      Type: "AWS::EC2::SecurityGroupIngress"
+      DependsOn: "InstanceSecurityGroup"
+      Properties:
+        GroupId: !Ref "InstanceSecurityGroup"
+        IpProtocol: "tcp"
+        FromPort: "0"
+        ToPort: "65535"
+        SourceSecurityGroupId: !Ref "InstanceSecurityGroup"
+
+    # NetworkAcl:
+    #   Type: "AWS::EC2::NetworkAcl"
+    #   Properties:
+    #     VpcId: !Ref VPC
+    # IngressRule0:
+    #   Type: "AWS::EC2::NetworkAclEntry"
+    #   Properties:
+    #     Egress: false
+    #     NetworkAclId: !Ref NetworkAcl
+    #     CidrBlock: "0.0.0.0/0"
+    #     Protocol: -1
+    #     RuleNumber: 100
+    #     RuleAction: "deny"
+    # EgressRule0:
+    #   Type: "AWS::EC2::NetworkAclEntry"
+    #   Properties:
+    #     Egress: true
+    #     NetworkAclId: !Ref NetworkAcl
+    #     CidrBlock: "0.0.0.0/0"
+    #     Protocol: -1
+    #     RuleNumber: 100
+    #     RuleAction: "deny"
   ##### CLOUDFRONT/S3 RESOURCES #####
     OriginAccessIdentity:
       Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
@@ -112,42 +320,85 @@ resources:
                 Forward: none
             ViewerProtocolPolicy: redirect-to-https # https only
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          PriceClass: PriceClass_100 # EU and NA
+          PriceClass: ${env:CF_PRICE_CLASS} # EU and NA
           #PriceClass_All
 
-    ##### DYNAMODB RESOURCES #####
-    Table:
-      Type: 'AWS::DynamoDB::Table'
+    ##### RDS RESOURCES #####
+    RDSSecret:
+      Type: "AWS::SecretsManager::Secret"
       Properties:
-        AttributeDefinitions:
-          - AttributeName: projectId
-            AttributeType: S
-        KeySchema:
-          - AttributeName: projectId
-            KeyType: HASH
-        ProvisionedThroughput:
-          ReadCapacityUnits: 1
-          WriteCapacityUnits: 1
-          #BillingMode: PAY_PER_REQUEST
-        TableName: ${self:provider.environment.DYNAMODB_TABLE}
+        Description: "This is a Secrets Manager secret for an RDS DB instance"
+        GenerateSecretString:
+          SecretStringTemplate: '{"username": "scrum_db_user"}'
+          GenerateStringKey: "password"
+          PasswordLength: 16
+          ExcludeCharacters: '"@/\'
 
+    DBSubnetGroup: 
+      Type: "AWS::RDS::DBSubnetGroup"
+      Properties: 
+        DBSubnetGroupDescription: private VPC subnets for RDS DB
+        SubnetIds: 
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        Tags: 
+          - 
+            Key: "type"
+            Value: "private"
+        
+    RDSCluster:
+      Type: 'AWS::RDS::DBCluster'
+      Properties: 
+        AllocatedStorage: 20
+        DBClusterIdentifier: postgresql-${env:PROJECT_NAME}-${sls:stage}-cluster
+        Engine: postgres
+        DBClusterParameterGroupName: default.postgresql13
+      DependsOn: DBSubnetGroup
+
+    RDSDBInstance:
+      Type: 'AWS::RDS::DBInstance'
+      Properties:
+        DBInstanceIdentifier: postgresql-${sls:stage}-instance
+        AvailabilityZone: ${env:REGION}
+        DBInstanceClass: ${env:DB_INSTANCE_TYPE}
+        DBClusterIdentifier: !Ref RDSCluster
+        EnableCloudwatchLogsExports: 
+          - postgresql
+        PubliclyAccessible: 'true'
+        DBSubnetGroupName: !Ref DBSubnetGroup
+        DBSecurityGroups:
+          - InstanceSecurityGroup
+        Engine: postgres
+        EngineVersion: 11.12    
+        MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}' ]]
+        MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
+        MultiAZ: false
+      DependsOn: DBSubnetGroup  
+
+    SecretRDSInstanceAttachment:
+      Type: "AWS::SecretsManager::SecretTargetAttachment"
+      Properties:
+        SecretId: !Ref RDSSecret
+        TargetId: !Ref RDSDBInstance
+        TargetType: AWS::RDS::DBInstance
+    
     ##### COGNITO RESOURCES #####    
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
       Properties:
-        UserPoolName: cognito_${env:PROJECT_NAME}_backend_user_pool
+        UserPoolName: cognito_${env:PROJECT_NAME}_${sls:stage}_backend_user_pool
       
     CognitoUserPoolClient:
       Type: AWS::Cognito::UserPoolClient
       Properties:
-        ClientName: cognito_sls_backend_client
+        ClientName: cognito_sls_${sls:stage}_backend_client
         UserPoolId:
           Ref: CognitoUserPool
 
     CognitoIdentityPool:
       Type: AWS::Cognito::IdentityPool
       Properties:
-        IdentityPoolName: cognito_${env:PROJECT_NAME}_identity_pool
+        IdentityPoolName: cognito_${env:PROJECT_NAME}_${sls:stage}_identity_pool
         AllowUnauthenticatedIdentities: false
         CognitoIdentityProviders:
           - ClientId:
@@ -180,7 +431,7 @@ resources:
     CognitoAuthRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: app_${env:PROJECT_NAME}_auth_role
+        RoleName: app_${env:PROJECT_NAME}_${sls:stage}_auth_role
         Path: /
         AssumeRolePolicyDocument:
           Version: "2012-10-17"
@@ -197,7 +448,7 @@ resources:
                 "ForAnyValue:StringLike":
                   "cognito-identity.amazonaws.com:amr": authenticated
         Policies:
-          - PolicyName: "cognito_${env:PROJECT_NAME}_authorized_policy"
+          - PolicyName: "cognito_${env:PROJECT_NAME}_${sls:stage}_authorized_policy"
             PolicyDocument:
               Version: "2012-10-17"
               Statement:
@@ -215,7 +466,7 @@ resources:
     AppSyncServiceRole:
       Type: AWS::IAM::Role
       Properties:
-        RoleName: !Sub "appsync_${env:PROJECT_NAME}_api_role"
+        RoleName: !Sub "appsync_${env:PROJECT_NAME}_${sls:stage}_api_role"
         AssumeRolePolicyDocument: 
           Version: "2012-10-17"
           Statement:
@@ -226,20 +477,27 @@ resources:
               Action:
                 - "sts:AssumeRole"  
         Policies: # appSync api can do these operations on DDB table defined in the stack (currently all basic operations)
-          - PolicyName: "dynamodb_${env:PROJECT_NAME}_policy"
+          - PolicyName: "rds_${env:PROJECT_NAME}_${sls:stage}_policy"
             PolicyDocument: 
               Version: "2012-10-17"
               Statement: 
-                - Effect: "Allow"
+                - Effect: 'Allow'
                   Action:
-                    - dynamodb:DescribeTable
-                    - dynamodb:Query
-                    - dynamodb:Scan
-                    - dynamodb:GetItem
-                    - dynamodb:PutItem
-                    - dynamodb:UpdateItem
-                    - dynamodb:DeleteItem
-                  Resource: "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
+                    - 'rds-data:DeleteItems'
+                    - 'rds-data:ExecuteSql'
+                    - 'rds-data:ExecuteStatement'
+                    - 'rds-data:GetItems'
+                    - 'rds-data:InsertItems'
+                    - 'rds-data:UpdateItems'
+                  Resource:
+                    - 'arn:aws:rds:${env:REGION}:${env:ACCOUNT_ID}:cluster:*'
+                    - 'arn:aws:rds:${env:REGION}:${env:ACCOUNT_ID}:cluster:*:*'
+                - Effect: 'Allow'
+                  Action:
+                    - 'secretsmanager:GetSecretValue'
+                  Resource:
+                    - 'arn:aws:secretsmanager:${env:REGION}:${env:ACCOUNT_ID}:secret:*'
+                    - 'arn:aws:secretsmanager:${env:REGION}:${env:ACCOUNT_ID}:secret:*:*'
 
   Outputs:
     DistributionId:

@@ -1,0 +1,7 @@
+{
+    "version": "2018-05-29",
+    "statements": [
+        $util.toJson("update Pets set type='$ctx.args.input.type', price=$ctx.args.input.price WHERE id='$ctx.args.input.id'"),
+        $util.toJson("select * from Pets WHERE id = '$ctx.args.input.id'")
+    ]
+}

@@ -1,9 +1,0 @@
-#set( $projectId = $util.autoUlid() )
-{
-   "version" : "2017-02-28",
-   "operation" : "PutItem",
-   "key" : {
-      "projectId" : $util.dynamodb.toDynamoDBJson("${projectId}")
-   },
-   "attributeValues" : $util.dynamodb.toMapValuesJson($ctx.args.input)
-}

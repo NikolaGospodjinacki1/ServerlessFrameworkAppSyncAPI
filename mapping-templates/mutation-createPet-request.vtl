@@ -1,0 +1,8 @@
+#set($id=$utils.autoId())
+{
+    "version": "2018-05-29",
+    "statements": [
+        "insert into Pets VALUES ('$id', '$ctx.args.input.type', $ctx.args.input.price)",
+        "select * from Pets WHERE id = '$id'"
+    ]
+}

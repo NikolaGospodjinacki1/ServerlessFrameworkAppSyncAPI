@@ -1,0 +1,12 @@
+PROJECT_NAME="scrummetrics"
+REGION="eu-west-1"
+ACCOUNT_ID="936540606503"
+DEV_PROFILE_NAME="serverlesspers"
+STATIC_BUCKET_NAME="scrummetrics-static-bucket"
+CF_PRICE_CLASS="PriceClass_100"
+HTTP_HEADERS=""{\n  \"Content-Security-Policy-Report-Only\": \"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com\"\
+      ,\n  \"Strict-Transport-Security\": \"max-age=31536000; includeSubdomains; preload\",\n  \"Referrer-Policy\": \"same-origin\",\n  \"X-XSS-Protection\": \"1; mode=block\",\n  \"X-Frame-Options\": \"\
+      DENY\",\n  \"X-Content-Type-Options\": \"nosniff\"\n}""
+
+DB_USERNAME="scrum_db_user"
+DB_INSTANCE_TYPE="db.t2.micro"

@@ -1,0 +1,15 @@
+MasterUsername: "{{resolve:secretmanager:DBcredentials:SecretString:username}}"
+MasterUserPassword: "{{resolve:secretmanager:DBcredentials:SecretString:password}}"
+
+RDSSecret:
+      Type: "AWS::SecretsManager::Secret"
+      Properties:
+        Name: DBcredentials
+        Description: "This is a Secrets Manager secret for an RDS DB instance"
+        GenerateSecretString:
+          SecretStringTemplate: '{"username": "scrum_db_user"}'
+          GenerateStringKey: "password"
+          PasswordLength: 16
+          ExcludeCharacters: '"@/\'
+
+awsSecretStoreArn: { Ref: RDSSecret } # The RDSClusterSecret ARN. Where RDSClusterSecret is the cluster secret defined in Resources

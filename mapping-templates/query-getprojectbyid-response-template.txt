@@ -1,2 +1,0 @@
-
-      $util.toJson($ctx.result.items.get(0))

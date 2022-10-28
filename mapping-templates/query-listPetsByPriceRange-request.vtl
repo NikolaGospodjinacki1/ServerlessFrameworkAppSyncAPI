@@ -1,0 +1,11 @@
+{
+    "version": "2018-05-29",
+    "statements": [
+            "select * from Pets where price > :MIN and price < :MAX"
+    ],
+
+    "variableMap": {
+        ":MAX": $util.toJson($ctx.args.max),
+        ":MIN": $util.toJson($ctx.args.min)
+    }
+}
