@@ -66,7 +66,7 @@ custom:
        name: ${env:PROJECT_NAME}_${sls:stage}_rds_datasource
        description: "RDS data source for Serverless POC app"
        config:
-         dbClusterIdentifier: { Ref: RDSCluster } # The identifier for RDSCluster. Where RDSCluster is the cluster defined in Resources
+         dbClusterIdentifier: { Ref: RDSDBInstance } # The identifier for RDSCluster. Where RDSCluster is the cluster defined in Resources
          awsSecretStoreArn: { Ref: RDSSecret } # The RDSClusterSecret ARN. Where RDSClusterSecret is the cluster secret defined in Resources
          serviceRoleArn: { Fn::GetAtt: [AppSyncServiceRole, Arn] } # Where RelationalDbServiceRole is an IAM role defined in Resources
          databaseName: ${env:PROJECT_NAME}_${sls:stage}_database
@@ -230,25 +230,21 @@ resources:
         RouteTableId: !Ref PrivateRouteTable
         SubnetId: !Ref PrivateSubnet2
     
-    InstanceSecurityGroup:
-      Type: "AWS::EC2::SecurityGroup"
-      Properties:
-        GroupName: "Example Security Group"
-        GroupDescription: "RDS traffic"
-        VpcId: !Ref VPC
-        SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: "0.0.0.0/0"
-
-    InstanceSecurityGroupIngress:
-      Type: "AWS::EC2::SecurityGroupIngress"
-      DependsOn: "InstanceSecurityGroup"
-      Properties:
-        GroupId: !Ref "InstanceSecurityGroup"
-        IpProtocol: "tcp"
-        FromPort: "0"
-        ToPort: "65535"
-        SourceSecurityGroupId: !Ref "InstanceSecurityGroup"
+    EC2SecurityGroup:
+        Type: "AWS::EC2::SecurityGroup"
+        Properties:
+            GroupDescription: "Database instances security group"
+            VpcId: !Ref VPC
+            SecurityGroupIngress: 
+              - 
+                CidrIp: "0.0.0.0/0"
+                FromPort: 3306
+                IpProtocol: "tcp"
+                ToPort: 3306
+            SecurityGroupEgress: 
+              - 
+                CidrIp: "0.0.0.0/0"
+                IpProtocol: "-1"
 
     # NetworkAcl:
     #   Type: "AWS::EC2::NetworkAcl"
@@ -346,35 +342,42 @@ resources:
             Key: "type"
             Value: "private"
         
-    RDSCluster:
-      Type: 'AWS::RDS::DBCluster'
-      Properties: 
-        AllocatedStorage: 20
-        DBClusterIdentifier: postgresql-${env:PROJECT_NAME}-${sls:stage}-cluster
-        Engine: postgres
-        DBClusterParameterGroupName: default.postgresql13
-      DependsOn: DBSubnetGroup
-
     RDSDBInstance:
       Type: 'AWS::RDS::DBInstance'
       Properties:
+        AllocatedStorage: 20
         DBInstanceIdentifier: postgresql-${sls:stage}-instance
-        AvailabilityZone: ${env:REGION}
+        AvailabilityZone: !Select 
+          - '1'
+          - !GetAZs ''
         DBInstanceClass: ${env:DB_INSTANCE_TYPE}
-        DBClusterIdentifier: !Ref RDSCluster
         EnableCloudwatchLogsExports: 
           - postgresql
         PubliclyAccessible: 'true'
         DBSubnetGroupName: !Ref DBSubnetGroup
-        DBSecurityGroups:
-          - InstanceSecurityGroup
+        VPCSecurityGroups:
+          - !Ref EC2SecurityGroup
         Engine: postgres
-        EngineVersion: 11.12    
+        EngineVersion: 13.7  
         MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}' ]]
         MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
         MultiAZ: false
       DependsOn: DBSubnetGroup  
 
+    # DBSecurityGroup:    
+    #   Type: AWS::RDS::DBSecurityGroup
+    #   Properties: 
+    #     DBSecurityGroupIngress: 
+    #       - !Ref DBSecurityGroupIngress
+    #     EC2VpcId: !Ref VPC
+    #     GroupDescription: Test DB sg
+
+    # DBSecurityGroupIngress:
+    #   Type: AWS::RDS::DBSecurityGroupIngress
+    #   Properties: 
+    #     DBSecurityGroupName: "DBSecurityGroup"
+    #     EC2SecurityGroupId: !Ref EC2SecurityGroup
+ 
     SecretRDSInstanceAttachment:
       Type: "AWS::SecretsManager::SecretTargetAttachment"
       Properties:
