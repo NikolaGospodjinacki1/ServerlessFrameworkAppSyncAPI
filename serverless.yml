@@ -363,20 +363,6 @@ resources:
         MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
         MultiAZ: false
       DependsOn: DBSubnetGroup  
-
-    # DBSecurityGroup:    
-    #   Type: AWS::RDS::DBSecurityGroup
-    #   Properties: 
-    #     DBSecurityGroupIngress: 
-    #       - !Ref DBSecurityGroupIngress
-    #     EC2VpcId: !Ref VPC
-    #     GroupDescription: Test DB sg
-
-    # DBSecurityGroupIngress:
-    #   Type: AWS::RDS::DBSecurityGroupIngress
-    #   Properties: 
-    #     DBSecurityGroupName: "DBSecurityGroup"
-    #     EC2SecurityGroupId: !Ref EC2SecurityGroup
  
     SecretRDSInstanceAttachment:
       Type: "AWS::SecretsManager::SecretTargetAttachment"
