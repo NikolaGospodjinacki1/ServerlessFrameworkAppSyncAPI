@@ -135,34 +135,113 @@ resources:
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
       Properties:
-        UserPoolName: cognito_${env:PROJECT_NAME}_backend_user_pool
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: False
+        AliasAttributes:
+          - email
+        MfaConfiguration: 'OFF'
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: True
+            RequireNumbers: True
+            RequireSymbols: False
+            RequireUppercase: True
+            TemporaryPasswordValidityDays: 7
+        Schema:
+          - Name: email
+            AttributeDataType: String
+            Mutable: True
+            Required: True
+        UserPoolAddOns:
+          AdvancedSecurityMode: 'OFF'
+        UserPoolName: !Sub 'user-pool-${env:PROJECT_NAME}-${sls:stage}'
       
     CognitoUserPoolClient:
+      DependsOn:
+        - CognitoUserPool
+        - CognitoUserPoolDomain
+        # - CognitoIdentityProvider
       Type: AWS::Cognito::UserPoolClient
       Properties:
-        ClientName: cognito_sls_backend_client
-        UserPoolId:
-          Ref: CognitoUserPool
-
-    CognitoIdentityPool:
-      Type: AWS::Cognito::IdentityPool
+        ClientName: !Sub 'client-${env:PROJECT_NAME}-${sls:stage}'
+        GenerateSecret: False
+        UserPoolId: !Ref CognitoUserPool
+        # SupportedIdentityProviders:
+        #   - !Ref CognitoIdentityProvider
+        #   - !Ref CognitoIdentityProviderSSO
+        CallbackURLs:
+          - http://localhost:4200 ### UZMI OD DEVOVA ILI SKONTAJ SAM ( vrv skontaj sam )
+        LogoutURLs: 
+          - http://localhost:4200
+        AllowedOAuthFlowsUserPoolClient: True
+        AllowedOAuthScopes:
+          - email
+          - openid
+          - profile
+        AllowedOAuthFlows:
+          - code
+          - implicit
+        ExplicitAuthFlows:
+          - ALLOW_ADMIN_USER_PASSWORD_AUTH
+    
+    CognitoUserPoolDomain:
+      DependsOn:
+        - CognitoUserPool
+      Type: AWS::Cognito::UserPoolDomain
       Properties:
-        IdentityPoolName: cognito_${env:PROJECT_NAME}_identity_pool
-        AllowUnauthenticatedIdentities: false
-        CognitoIdentityProviders:
-          - ClientId:
-              Ref: CognitoUserPoolClient
-            ProviderName:
-              Fn::GetAtt: [CognitoUserPool, ProviderName]
+        Domain: "metricstest123"
+        UserPoolId: !Ref CognitoUserPool
 
-    CognitoIdentityPoolRoles:
-      Type: AWS::Cognito::IdentityPoolRoleAttachment
-      Properties:
-        IdentityPoolId:
-          Ref: CognitoIdentityPool
-        Roles:
-          authenticated:
-            Fn::GetAtt: [CognitoAuthRole, Arn]
+    # CognitoIdentityPool:
+    #   Type: AWS::Cognito::IdentityPool
+    #   Properties:
+    #     IdentityPoolName: cognito_${env:PROJECT_NAME}_identity_pool
+    #     AllowUnauthenticatedIdentities: false
+    #     CognitoIdentityProviders:
+    #       - ClientId:
+    #           Ref: CognitoUserPoolClient
+    #         ProviderName:
+    #           Fn::GetAtt: [CognitoUserPool, ProviderName]
+
+    # CognitoIdentityPoolRoles:
+    #   Type: AWS::Cognito::IdentityPoolRoleAttachment
+    #   Properties:
+    #     IdentityPoolId:
+    #       Ref: CognitoIdentityPool
+    #     Roles:
+    #       authenticated:
+    #         Fn::GetAtt: [CognitoAuthRole, Arn]
+
+    # CognitoIdentityProvider:
+    #   DependsOn:
+    #     - CognitoUserPool
+    #   Type: AWS::Cognito::UserPoolIdentityProvider
+    #   Properties:
+    #     UserPoolId: !Ref CognitoUserPool
+    #     ProviderName: 'TheBASE'
+    #     ProviderDetails:
+    #       MetadataURL: !Join
+    #         - ""
+    #         - - !Ref SAMLMetadataURL ### UZMI OD DEVOVA ILI SKONTAJ SAM ( vrv skontaj sam )
+    #     ProviderType: "SAML"
+    #     AttributeMapping:
+    #         email: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+
+    # CognitoIdentityProviderSSO:
+    #   DependsOn:
+    #     - CognitoUserPool
+    #   Type: AWS::Cognito::UserPoolIdentityProvider
+    #   Properties:
+    #     UserPoolId: !Ref CognitoUserPool
+    #     ProviderName: 'SSO-TheBASE'
+    #     ProviderDetails:
+    #       MetadataFile: !Ref SAMLMetadataFile ### UZMI OD DEVOVA ILI SKONTAJ SAM ( vrv skontaj sam )
+    #     ProviderType: "SAML"
+    #     AttributeMapping:
+    #         email: "NameId"
+    #         given_name: "FirstName"
+    #         family_name: "LastName"
 
     ##### ROLE/POLICY RESOURCES #####
     StaticResourcesBucketPolicy:
@@ -190,12 +269,12 @@ resources:
                 Federated: "cognito-identity.amazonaws.com"
               Action:
                 - "sts:AssumeRoleWithWebIdentity"
-              Condition:
-                StringEquals:
-                  "cognito-identity.amazonaws.com:aud":
-                    Ref: CognitoIdentityPool
-                "ForAnyValue:StringLike":
-                  "cognito-identity.amazonaws.com:amr": authenticated
+              # Condition:
+              #   StringEquals:
+              #     "cognito-identity.amazonaws.com:aud":
+              #       Ref: CognitoIdentityPool
+              #   "ForAnyValue:StringLike":
+              #     "cognito-identity.amazonaws.com:amr": authenticated
         Policies:
           - PolicyName: "cognito_${env:PROJECT_NAME}_authorized_policy"
             PolicyDocument:
