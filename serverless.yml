@@ -167,7 +167,8 @@ resources:
         ClientName: !Sub 'client-${env:PROJECT_NAME}-${sls:stage}'
         GenerateSecret: False
         UserPoolId: !Ref CognitoUserPool
-        # SupportedIdentityProviders:
+        SupportedIdentityProviders:
+            - COGNITO
         #   - !Ref CognitoIdentityProvider
         #   - !Ref CognitoIdentityProviderSSO
         CallbackURLs:
@@ -184,6 +185,7 @@ resources:
           - implicit
         ExplicitAuthFlows:
           - ALLOW_ADMIN_USER_PASSWORD_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
     
     CognitoUserPoolDomain:
       DependsOn:

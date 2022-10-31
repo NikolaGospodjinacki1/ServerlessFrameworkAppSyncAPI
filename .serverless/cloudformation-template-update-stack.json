@@ -175,6 +175,9 @@
         "AdminCreateUserConfig": {
           "AllowAdminCreateUserOnly": false
         },
+        "AliasAttributes": [
+          "email"
+        ],
         "MfaConfiguration": "OFF",
         "Policies": {
           "PasswordPolicy": {
@@ -197,7 +200,9 @@
         "UserPoolAddOns": {
           "AdvancedSecurityMode": "OFF"
         },
-        "UserPoolName": "cognito_scrummetrics_backend_user_pool"
+        "UserPoolName": {
+          "Fn::Sub": "user-pool-scrummetrics-dev"
+        }
       }
     },
     "CognitoUserPoolClient": {
@@ -214,6 +219,9 @@
         "UserPoolId": {
           "Ref": "CognitoUserPool"
         },
+        "SupportedIdentityProviders": [
+          "COGNITO"
+        ],
         "CallbackURLs": [
           "http://localhost:4200"
         ],
@@ -231,7 +239,8 @@
           "implicit"
         ],
         "ExplicitAuthFlows": [
-          "ALLOW_ADMIN_USER_PASSWORD_AUTH"
+          "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+          "ALLOW_REFRESH_TOKEN_AUTH"
         ]
       }
     },
